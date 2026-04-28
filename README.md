@@ -20,3 +20,6 @@ pip install -r requirements.txt
 ```
 streamlit run dashboard.py
 ```
+
+## Akses langsung (tanpa install)
+ https://shyedcmiqvybgbartpthqm.streamlit.app/
