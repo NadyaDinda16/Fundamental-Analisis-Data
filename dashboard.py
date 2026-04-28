@@ -1,380 +1,379 @@
-import streamlit as st
+import os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
 import seaborn as sns
+import streamlit as st
 import warnings
 warnings.filterwarnings('ignore')
 
-# ── PAGE CONFIG ──────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────
+# PAGE CONFIG
+# ─────────────────────────────────────────────
 st.set_page_config(
-    page_title="E-Commerce Analytics Dashboard",
+    page_title="E-Commerce Dashboard",
     page_icon="🛒",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
-# ── CUSTOM CSS ────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────
+# STYLE
+# ─────────────────────────────────────────────
 st.markdown("""
 <style>
-    [data-testid="stMetricValue"] { font-size: 2rem; font-weight: 700; }
+    .main-title {
+        font-size: 2.2rem;
+        font-weight: 700;
+        color: #1a1a2e;
+    }
+    .sub-title {
+        font-size: 1rem;
+        color: #555;
+        margin-bottom: 1.5rem;
+    }
     .metric-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        border-radius: 12px; padding: 1rem 1.5rem; color: white; margin-bottom: 1rem;
+        background: #f0f4ff;
+        border-radius: 12px;
+        padding: 1rem 1.2rem;
+        border-left: 5px solid #4361ee;
     }
     .section-header {
-        font-size: 1.3rem; font-weight: 700;
-        border-left: 4px solid #667eea; padding-left: 10px; margin: 1.5rem 0 1rem 0;
+        font-size: 1.3rem;
+        font-weight: 600;
+        color: #1a1a2e;
+        border-bottom: 2px solid #4361ee;
+        padding-bottom: 0.4rem;
+        margin-bottom: 1rem;
     }
     .insight-box {
-        background: #f0f4ff; border-left: 4px solid #667eea;
-        border-radius: 0 8px 8px 0; padding: 1rem; margin: 1rem 0;
+        background: #eef2ff;
+        border-radius: 10px;
+        padding: 1rem 1.2rem;
+        color: #1a1a2e;
+        font-size: 0.92rem;
+        line-height: 1.7;
+    }
+    .rec-box {
+        background: #f0fdf4;
+        border-radius: 10px;
+        padding: 1rem 1.2rem;
+        color: #166534;
+        font-size: 0.92rem;
+        line-height: 1.7;
+        border-left: 4px solid #22c55e;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# ── DATA GENERATION (simulate E-commerce dataset) ────────────────────────────
+# ─────────────────────────────────────────────
+# LOAD DATA
+# ─────────────────────────────────────────────
 @st.cache_data
-def generate_data():
-    np.random.seed(42)
-    n = 5000
+def load_data():
+    data_path = "E-commerce-public-dataset"
+    data = {}
+    for file in os.listdir(data_path):
+        if file.endswith(".csv"):
+            key = file.replace(".csv", "")
+            data[key] = pd.read_csv(os.path.join(data_path, file))
 
-    categories_pt = [
-        'beleza_saude', 'relogios_presentes', 'cama_mesa_banho',
-        'esporte_lazer', 'informatica_acessorios', 'moveis_decoracao',
-        'utilidades_domesticas', 'ferramentas_jardim', 'automotivo',
-        'brinquedos', 'eletronicos', 'perfumaria', 'malas_acessorios',
-        'instrumentos_musicais', 'livros_tecnicos'
-    ]
-    categories_en = {
+    customers    = data['customers_dataset']
+    orders       = data['orders_dataset']
+    order_items  = data['order_items_dataset']
+    products     = data['products_dataset']
+    order_reviews= data['order_reviews_dataset']
+    payments     = data['order_payments_dataset']
+
+    # ── Cleaning ──────────────────────────────
+    products['product_category_name'] = products['product_category_name'].fillna('unknown')
+    orders = orders.dropna(subset=['order_purchase_timestamp'])
+    order_reviews = order_reviews.drop_duplicates(subset=['review_id'])
+    order_items   = order_items.drop_duplicates()
+    orders        = orders.drop_duplicates()
+
+    orders['order_purchase_timestamp']   = pd.to_datetime(orders['order_purchase_timestamp'])
+    orders['order_delivered_customer_date'] = pd.to_datetime(orders['order_delivered_customer_date'])
+
+    orders_delivered = orders[orders['order_status'] == 'delivered'].copy()
+    orders_delivered = orders_delivered.dropna(subset=['order_delivered_customer_date'])
+
+    orders_delivered['delivery_days'] = (
+        orders_delivered['order_delivered_customer_date'] -
+        orders_delivered['order_purchase_timestamp']
+    ).dt.days
+
+    order_items = order_items[(order_items['price'] >= 0) &
+                              (order_items['freight_value'] >= 0)]
+
+    # ── Merge ─────────────────────────────────
+    main_df = (
+        orders_delivered
+        .merge(order_items,   on='order_id')
+        .merge(products,      on='product_id')
+        .merge(payments,      on='order_id')
+        .merge(customers,     on='customer_id')
+    )
+    main_df['revenue'] = main_df['price'] + main_df['freight_value']
+
+    main_df = main_df.merge(
+        order_reviews[['order_id', 'review_score']],
+        on='order_id', how='left'
+    )
+
+    # Translate category names
+    category_map = {
         'beleza_saude': 'Health & Beauty',
         'relogios_presentes': 'Watches & Gifts',
-        'cama_mesa_banho': 'Bed, Bath & Table',
+        'cama_mesa_banho': 'Bed Bath & Table',
         'esporte_lazer': 'Sports & Leisure',
         'informatica_acessorios': 'Computer Accessories',
         'moveis_decoracao': 'Furniture & Decor',
-        'utilidades_domesticas': 'Home Utilities',
+        'utilidades_domesticas': 'Housewares',
         'ferramentas_jardim': 'Garden Tools',
-        'automotivo': 'Automotive',
+        'telefonia': 'Telephony',
+        'automotivo': 'Auto',
         'brinquedos': 'Toys',
+        'cool_stuff': 'Cool Stuff',
         'eletronicos': 'Electronics',
-        'perfumaria': 'Perfumery',
-        'malas_acessorios': 'Bags & Accessories',
-        'instrumentos_musicais': 'Musical Instruments',
-        'livros_tecnicos': 'Technical Books'
+        'eletrodomesticos': 'Appliances',
+        'unknown': 'Unknown',
     }
+    main_df['category_en'] = main_df['product_category_name'].map(
+        lambda x: category_map.get(x, x.replace('_', ' ').title())
+    )
 
-    weights = [0.14, 0.12, 0.11, 0.10, 0.09, 0.08, 0.07, 0.06, 0.05,
-               0.04, 0.04, 0.04, 0.03, 0.02, 0.01]
+    return main_df
 
-    cat = np.random.choice(categories_pt, size=n, p=weights)
-    price_map = {
-        'beleza_saude': (80, 250), 'relogios_presentes': (120, 400),
-        'cama_mesa_banho': (60, 200), 'esporte_lazer': (100, 350),
-        'informatica_acessorios': (150, 500), 'moveis_decoracao': (200, 800),
-        'utilidades_domesticas': (50, 180), 'ferramentas_jardim': (70, 300),
-        'automotivo': (90, 400), 'brinquedos': (40, 150),
-        'eletronicos': (200, 1000), 'perfumaria': (60, 200),
-        'malas_acessorios': (80, 300), 'instrumentos_musicais': (150, 600),
-        'livros_tecnicos': (30, 120)
-    }
+# ─────────────────────────────────────────────
+# HEADER
+# ─────────────────────────────────────────────
+st.markdown('<div class="main-title">🛒 E-Commerce Public Dataset Dashboard</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Analisis Revenue Kategori Produk & Pengaruh Waktu Pengiriman Terhadap Kepuasan Pelanggan (2017–2018)</div>', unsafe_allow_html=True)
 
-    prices, freight = [], []
-    for c in cat:
-        lo, hi = price_map[c]
-        p = np.random.uniform(lo, hi)
-        prices.append(round(p, 2))
-        freight.append(round(np.random.uniform(10, 50), 2))
+with st.spinner("Memuat data..."):
+    main_df = load_data()
 
-    review_scores = np.random.choice([1, 2, 3, 4, 5], size=n,
-                                      p=[0.06, 0.08, 0.15, 0.28, 0.43])
+# ─────────────────────────────────────────────
+# SIDEBAR FILTER
+# ─────────────────────────────────────────────
+st.sidebar.header("⚙️ Filter")
+top_n = st.sidebar.slider("Jumlah Kategori yang Ditampilkan (Q1)", 5, 20, 10)
+score_filter = st.sidebar.multiselect(
+    "Filter Review Score (Q2)",
+    options=[1, 2, 3, 4, 5],
+    default=[1, 2, 3, 4, 5]
+)
 
-    # delivery days influenced by review score
-    delivery_days = []
-    for score in review_scores:
-        if score == 5:
-            d = np.random.normal(7, 2)
-        elif score == 4:
-            d = np.random.normal(10, 3)
-        elif score == 3:
-            d = np.random.normal(14, 5)
-        elif score == 2:
-            d = np.random.normal(19, 7)
-        else:
-            d = np.random.normal(25, 10)
-        delivery_days.append(max(1, int(d)))
+year_range = st.sidebar.select_slider(
+    "Filter Tahun Pembelian",
+    options=[2017, 2018],
+    value=(2017, 2018)
+)
 
-    states = ['SP', 'RJ', 'MG', 'RS', 'PR', 'SC', 'BA', 'GO', 'ES', 'PE']
-    state_weights = [0.45, 0.18, 0.12, 0.07, 0.05, 0.04, 0.03, 0.02, 0.02, 0.02]
+# Apply year filter
+df_filtered = main_df[main_df['order_purchase_timestamp'].dt.year.between(year_range[0], year_range[1])]
 
-    df = pd.DataFrame({
-        'product_category_name': cat,
-        'product_category_en': [categories_en[c] for c in cat],
-        'price': prices,
-        'freight_value': freight,
-        'revenue': [p + f for p, f in zip(prices, freight)],
-        'review_score': review_scores,
-        'delivery_days': delivery_days,
-        'customer_state': np.random.choice(states, size=n, p=state_weights),
-        'payment_type': np.random.choice(
-            ['credit_card', 'boleto', 'debit_card', 'voucher'],
-            size=n, p=[0.74, 0.19, 0.05, 0.02]
-        ),
-        'order_month': np.random.choice(
-            ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-             'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
-            size=n,
-            p=[0.05, 0.06, 0.08, 0.07, 0.09, 0.08,
-               0.09, 0.10, 0.09, 0.10, 0.10, 0.09]
-        )
-    })
-    return df
+# ─────────────────────────────────────────────
+# KPI METRICS
+# ─────────────────────────────────────────────
+total_rev   = df_filtered['revenue'].sum()
+total_orders= df_filtered['order_id'].nunique()
+avg_delivery= df_filtered['delivery_days'].mean()
+avg_score   = df_filtered['review_score'].mean()
 
-df = generate_data()
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("💰 Total Revenue", f"R$ {total_rev:,.0f}")
+c2.metric("📦 Total Orders", f"{total_orders:,}")
+c3.metric("🚚 Avg Delivery (hari)", f"{avg_delivery:.1f}")
+c4.metric("⭐ Avg Review Score", f"{avg_score:.2f}")
 
-# ── SIDEBAR ───────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.image("https://img.icons8.com/fluency/96/shopping-cart.png", width=80)
-    st.title("🛒 E-Commerce\nDashboard")
-    st.markdown("**Proyek Analisis Data**")
-    st.markdown("Nadya Dinda Aisha Putri")
-    st.divider()
+st.markdown("---")
 
-    st.subheader("🔧 Filter Data")
+# ─────────────────────────────────────────────
+# Q1 – REVENUE PER KATEGORI
+# ─────────────────────────────────────────────
+st.markdown('<div class="section-header">📊 Pertanyaan 1 — Kategori Produk dengan Revenue Tertinggi (2017–2018)</div>', unsafe_allow_html=True)
 
-    all_cats = sorted(df['product_category_en'].unique())
-    selected_cats = st.multiselect("Kategori Produk", all_cats, default=all_cats[:8])
+category_revenue = (
+    df_filtered.groupby('category_en')['revenue']
+    .sum()
+    .sort_values(ascending=False)
+    .head(top_n)
+    .reset_index()
+)
+category_revenue.columns = ['Kategori', 'Revenue']
+total = category_revenue['Revenue'].sum()
+category_revenue['Kontribusi (%)'] = (category_revenue['Revenue'] / df_filtered['revenue'].sum() * 100).round(2)
 
-    score_range = st.slider("Review Score", 1, 5, (1, 5))
-    delivery_max = st.slider("Maks. Delivery Days", 1, 60, 60)
-
-    st.divider()
-    st.caption("📊 Dataset: Brazilian E-Commerce Public Dataset")
-
-# ── FILTER ────────────────────────────────────────────────────────────────────
-if selected_cats:
-    filtered = df[
-        (df['product_category_en'].isin(selected_cats)) &
-        (df['review_score'].between(*score_range)) &
-        (df['delivery_days'] <= delivery_max)
-    ]
-else:
-    filtered = df[
-        (df['review_score'].between(*score_range)) &
-        (df['delivery_days'] <= delivery_max)
-    ]
-
-# ── HEADER ────────────────────────────────────────────────────────────────────
-st.title("🛒 E-Commerce Analytics Dashboard")
-st.markdown("Analisis performa penjualan, kategori produk, dan kepuasan pelanggan berdasarkan data Brazilian E-Commerce Public Dataset.")
-
-# ── KPI METRICS ───────────────────────────────────────────────────────────────
-st.markdown('<div class="section-header">📌 Key Performance Indicators</div>', unsafe_allow_html=True)
-
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    st.metric("💰 Total Revenue", f"R$ {filtered['revenue'].sum():,.0f}")
-with col2:
-    st.metric("📦 Total Orders", f"{len(filtered):,}")
-with col3:
-    st.metric("⭐ Avg Review Score", f"{filtered['review_score'].mean():.2f} / 5")
-with col4:
-    st.metric("🚚 Avg Delivery Days", f"{filtered['delivery_days'].mean():.1f} hari")
-
-st.divider()
-
-# ── PERTANYAAN 1: TOP CATEGORIES BY REVENUE ───────────────────────────────────
-st.markdown('<div class="section-header">📊 Pertanyaan 1: Kategori Produk dengan Pendapatan Tertinggi</div>', unsafe_allow_html=True)
-
-col_left, col_right = st.columns([2, 1])
+col_left, col_right = st.columns([3, 2])
 
 with col_left:
-    top_n = st.slider("Tampilkan Top N Kategori", 5, 15, 10, key="top_n")
-
-    cat_rev = (
-        filtered.groupby('product_category_en')['revenue']
-        .sum()
-        .sort_values(ascending=False)
-        .head(top_n)
+    fig1, ax1 = plt.subplots(figsize=(9, 5))
+    colors = sns.color_palette("Blues_r", top_n)
+    bars = ax1.barh(
+        category_revenue['Kategori'][::-1],
+        category_revenue['Revenue'][::-1],
+        color=colors[::-1],
+        edgecolor='white'
     )
-    total_rev = filtered['revenue'].sum()
-    cat_pct = (cat_rev / total_rev * 100).round(2)
-
-    fig1, ax1 = plt.subplots(figsize=(10, 5))
-    colors = plt.cm.RdYlGn(np.linspace(0.3, 0.9, len(cat_rev)))[::-1]
-    bars = ax1.bar(range(len(cat_rev)), cat_rev.values, color=colors, edgecolor='white', linewidth=0.5)
-
-    for i, (bar, pct) in enumerate(zip(bars, cat_pct.values)):
-        ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + cat_rev.max() * 0.01,
-                 f'{pct:.1f}%', ha='center', va='bottom', fontsize=8, fontweight='bold')
-
-    ax1.set_xticks(range(len(cat_rev)))
-    ax1.set_xticklabels(cat_rev.index, rotation=35, ha='right', fontsize=9)
-    ax1.set_ylabel('Total Revenue (R$)')
-    ax1.set_title(f'Top {top_n} Product Categories by Revenue', fontsize=13, fontweight='bold')
-    ax1.yaxis.set_major_formatter(mtick.FuncFormatter(lambda x, _: f'R$ {x:,.0f}'))
-    ax1.grid(axis='y', alpha=0.3)
-    fig1.tight_layout()
+    # Label value
+    for bar, val in zip(bars, category_revenue['Revenue'][::-1]):
+        ax1.text(bar.get_width() + total * 0.005, bar.get_y() + bar.get_height() / 2,
+                 f"R$ {val/1e6:.2f}M", va='center', fontsize=8.5, color='#333')
+    ax1.xaxis.set_major_formatter(mtick.FuncFormatter(lambda x, _: f'R$ {x/1e6:.1f}M'))
+    ax1.set_xlabel("Total Revenue")
+    ax1.set_title(f"Top {top_n} Kategori Produk berdasarkan Revenue", fontsize=13, fontweight='bold', pad=12)
+    ax1.spines[['top', 'right']].set_visible(False)
+    plt.tight_layout()
     st.pyplot(fig1)
 
 with col_right:
-    st.markdown("**Tabel Kontribusi Revenue**")
-    cat_table = pd.DataFrame({
-        'Category': cat_rev.index,
-        'Revenue (R$)': cat_rev.values.round(0).astype(int),
-        'Kontribusi (%)': cat_pct.values
-    }).reset_index(drop=True)
-    cat_table.index += 1
-    st.dataframe(cat_table.style.background_gradient(subset=['Revenue (R$)'], cmap='YlGn'),
-                 use_container_width=True)
+    st.markdown("**📋 Tabel Ringkasan**")
+    st.dataframe(
+        category_revenue.style.format({'Revenue': 'R$ {:,.0f}', 'Kontribusi (%)': '{:.2f}%'}),
+        use_container_width=True,
+        height=380
+    )
 
-st.markdown("""
-<div class="insight-box">
-💡 <b>Insight Pertanyaan 1:</b><br>
-• Kategori <b>Health & Beauty</b> dan <b>Watches & Gifts</b> secara konsisten mendominasi total revenue.<br>
-• Distribusi revenue menunjukkan pola <b>long-tail</b> — top 5 kategori menyumbang lebih dari 50% total pendapatan.<br>
-• Strategi bisnis sebaiknya berfokus pada menjaga ketersediaan stok dan kampanye promosi untuk kategori-kategori teratas ini.
-</div>
-""", unsafe_allow_html=True)
+# Pie chart kontribusi top 5
+fig2, ax2 = plt.subplots(figsize=(6, 4))
+top5 = category_revenue.head(5)
+others = pd.DataFrame([{
+    'Kategori': 'Others',
+    'Revenue': df_filtered['revenue'].sum() - top5['Revenue'].sum(),
+    'Kontribusi (%)': 100 - top5['Kontribusi (%)'].sum()
+}])
+pie_data = pd.concat([top5, others], ignore_index=True)
 
-st.divider()
+palette = sns.color_palette("Set2", len(pie_data))
+wedges, texts, autotexts = ax2.pie(
+    pie_data['Revenue'],
+    labels=pie_data['Kategori'],
+    autopct='%1.1f%%',
+    colors=palette,
+    startangle=140,
+    pctdistance=0.82,
+    wedgeprops={'edgecolor': 'white', 'linewidth': 1.5}
+)
+for at in autotexts:
+    at.set_fontsize(8)
+ax2.set_title("Kontribusi Revenue — Top 5 Kategori vs Lainnya", fontsize=11, fontweight='bold')
+plt.tight_layout()
 
-# ── PERTANYAAN 2: DELIVERY TIME VS REVIEW SCORE ───────────────────────────────
-st.markdown('<div class="section-header">📦 Pertanyaan 2: Hubungan Delivery Time & Review Score</div>', unsafe_allow_html=True)
-
-col_a, col_b = st.columns(2)
-
-with col_a:
-    fig2, ax2 = plt.subplots(figsize=(8, 5))
-    palette = {1: '#e74c3c', 2: '#e67e22', 3: '#f1c40f', 4: '#2ecc71', 5: '#27ae60'}
-    score_labels = [1, 2, 3, 4, 5]
-    data_by_score = [filtered[filtered['review_score'] == s]['delivery_days'].values
-                     for s in score_labels]
-
-    bp = ax2.boxplot(data_by_score, patch_artist=True, notch=False,
-                     medianprops=dict(color='black', linewidth=2))
-    for patch, score in zip(bp['boxes'], score_labels):
-        patch.set_facecolor(palette[score])
-        patch.set_alpha(0.8)
-
-    ax2.set_xticklabels(['⭐ 1', '⭐⭐ 2', '⭐⭐⭐ 3', '⭐⭐⭐⭐ 4', '⭐⭐⭐⭐⭐ 5'])
-    ax2.set_xlabel('Review Score')
-    ax2.set_ylabel('Delivery Days')
-    ax2.set_title('Delivery Time per Review Score', fontsize=13, fontweight='bold')
-    ax2.grid(axis='y', alpha=0.3)
-    fig2.tight_layout()
+col_pie, col_ins = st.columns([2, 3])
+with col_pie:
     st.pyplot(fig2)
+with col_ins:
+    st.markdown('<div class="insight-box">💡 <b>Insight:</b><br>'
+                '• Kategori <b>Health & Beauty</b> menjadi kontributor revenue terbesar (±9%).<br>'
+                '• 5 kategori teratas menyumbang hampir <b>40% total revenue</b>.<br>'
+                '• Produk kebutuhan sehari-hari & lifestyle mendominasi pasar.<br>'
+                '• Kategori Watches & Gifts dan Bed Bath & Table sangat potensial untuk strategi <i>upselling</i> & <i>bundling</i>.</div>',
+                unsafe_allow_html=True)
+    st.markdown("")
+    st.markdown('<div class="rec-box">✅ <b>Rekomendasi:</b><br>'
+                '• <b>Scaling:</b> Prioritaskan Health & Beauty dengan promo, stok, dan iklan.<br>'
+                '• <b>Upselling:</b> Watches & Gifts dan Bed Bath & Table untuk bundle deals.<br>'
+                '• <b>Exposure:</b> Tingkatkan visibilitas kategori menengah (Sports, Computer Accessories).</div>',
+                unsafe_allow_html=True)
 
-with col_b:
-    fig3, ax3 = plt.subplots(figsize=(8, 5))
-    avg_delivery = filtered.groupby('review_score')['delivery_days'].mean()
-    colors_line = ['#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#27ae60']
-    bars2 = ax3.bar(avg_delivery.index, avg_delivery.values, color=colors_line, edgecolor='white')
-    for bar, val in zip(bars2, avg_delivery.values):
-        ax3.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.3,
-                 f'{val:.1f}d', ha='center', va='bottom', fontweight='bold')
-    ax3.set_xlabel('Review Score')
-    ax3.set_ylabel('Rata-rata Delivery Days')
-    ax3.set_title('Avg Delivery Days per Review Score', fontsize=13, fontweight='bold')
-    ax3.set_xticks([1, 2, 3, 4, 5])
-    ax3.set_xticklabels(['⭐ 1', '⭐⭐ 2', '⭐⭐⭐ 3', '⭐⭐⭐⭐ 4', '⭐⭐⭐⭐⭐ 5'])
-    ax3.grid(axis='y', alpha=0.3)
-    fig3.tight_layout()
+st.markdown("---")
+
+# ─────────────────────────────────────────────
+# Q2 – DELIVERY TIME VS REVIEW SCORE
+# ─────────────────────────────────────────────
+st.markdown('<div class="section-header">🚚 Pertanyaan 2 — Pengaruh Delivery Time terhadap Review Score (2017–2018)</div>', unsafe_allow_html=True)
+
+df_q2 = df_filtered[df_filtered['review_score'].isin(score_filter)].dropna(subset=['review_score', 'delivery_days'])
+df_q2['review_score'] = df_q2['review_score'].astype(int)
+
+col_box, col_bar = st.columns(2)
+
+with col_box:
+    fig3, ax3 = plt.subplots(figsize=(7, 4.5))
+    palette_box = {1: '#ef4444', 2: '#f97316', 3: '#eab308', 4: '#84cc16', 5: '#22c55e'}
+    sns.boxplot(
+        data=df_q2,
+        x='review_score',
+        y='delivery_days',
+        palette=palette_box,
+        width=0.55,
+        flierprops={'marker': 'o', 'markersize': 3, 'alpha': 0.3},
+        ax=ax3
+    )
+    ax3.set_title("Distribusi Delivery Time per Review Score", fontsize=12, fontweight='bold', pad=10)
+    ax3.set_xlabel("Review Score (⭐)")
+    ax3.set_ylabel("Delivery Days")
+    ax3.spines[['top', 'right']].set_visible(False)
+    plt.tight_layout()
     st.pyplot(fig3)
 
-st.markdown("""
-<div class="insight-box">
-💡 <b>Insight Pertanyaan 2:</b><br>
-• Terdapat <b>korelasi negatif</b> yang jelas antara delivery time dan review score.<br>
-• Rating 1 → rata-rata pengiriman ~25 hari; Rating 5 → rata-rata hanya ~7 hari.<br>
-• Variasi (spread) delivery days lebih besar pada rating rendah, menandakan <b>inkonsistensi logistik</b> berdampak buruk pada kepuasan pelanggan.<br>
-• <b>Rekomendasi:</b> Prioritaskan optimasi kecepatan dan konsistensi pengiriman untuk meningkatkan review score secara keseluruhan.
-</div>
-""", unsafe_allow_html=True)
+with col_bar:
+    avg_delivery_score = df_q2.groupby('review_score')['delivery_days'].mean().reset_index()
+    avg_delivery_score.columns = ['Review Score', 'Avg Delivery Days']
 
-st.divider()
-
-# ── ANALISIS TAMBAHAN ─────────────────────────────────────────────────────────
-st.markdown('<div class="section-header">📈 Analisis Tambahan</div>', unsafe_allow_html=True)
-
-col_c, col_d = st.columns(2)
-
-with col_c:
-    st.markdown("**Distribusi Metode Pembayaran**")
-    payment_counts = filtered['payment_type'].value_counts()
-    payment_labels = {
-        'credit_card': 'Kartu Kredit', 'boleto': 'Boleto',
-        'debit_card': 'Kartu Debit', 'voucher': 'Voucher'
-    }
-    fig4, ax4 = plt.subplots(figsize=(6, 4))
-    wedge_colors = ['#667eea', '#764ba2', '#f093fb', '#ffecd2']
-    ax4.pie(payment_counts.values,
-            labels=[payment_labels.get(x, x) for x in payment_counts.index],
-            autopct='%1.1f%%', colors=wedge_colors, startangle=140,
-            wedgeprops={'edgecolor': 'white', 'linewidth': 2})
-    ax4.set_title('Metode Pembayaran', fontsize=12, fontweight='bold')
-    fig4.tight_layout()
+    fig4, ax4 = plt.subplots(figsize=(7, 4.5))
+    bar_colors = [palette_box.get(int(s), '#888') for s in avg_delivery_score['Review Score']]
+    bars = ax4.bar(
+        avg_delivery_score['Review Score'].astype(str),
+        avg_delivery_score['Avg Delivery Days'],
+        color=bar_colors,
+        edgecolor='white',
+        width=0.55
+    )
+    for bar, val in zip(bars, avg_delivery_score['Avg Delivery Days']):
+        ax4.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.3,
+                 f"{val:.1f}d", ha='center', va='bottom', fontsize=9, fontweight='bold')
+    ax4.set_title("Rata-rata Delivery Time per Review Score", fontsize=12, fontweight='bold', pad=10)
+    ax4.set_xlabel("Review Score (⭐)")
+    ax4.set_ylabel("Avg Delivery Days")
+    ax4.spines[['top', 'right']].set_visible(False)
+    plt.tight_layout()
     st.pyplot(fig4)
 
-with col_d:
-    st.markdown("**Revenue per State (Top 10)**")
-    state_rev = filtered.groupby('customer_state')['revenue'].sum().sort_values(ascending=True).tail(10)
-    fig5, ax5 = plt.subplots(figsize=(6, 4))
-    bars5 = ax5.barh(state_rev.index, state_rev.values,
-                     color=plt.cm.Blues(np.linspace(0.4, 0.9, len(state_rev))))
-    ax5.xaxis.set_major_formatter(mtick.FuncFormatter(lambda x, _: f'R${x/1000:.0f}K'))
-    ax5.set_title('Revenue per State', fontsize=12, fontweight='bold')
-    ax5.grid(axis='x', alpha=0.3)
-    fig5.tight_layout()
-    st.pyplot(fig5)
+# Scatter / trend line
+fig5, ax5 = plt.subplots(figsize=(10, 3.5))
+sample = df_q2.sample(min(3000, len(df_q2)), random_state=42)
+sns.regplot(
+    data=sample,
+    x='delivery_days',
+    y='review_score',
+    scatter_kws={'alpha': 0.15, 'color': '#4361ee', 's': 20},
+    line_kws={'color': '#ef4444', 'linewidth': 2},
+    ax=ax5
+)
+ax5.set_title("Trend: Delivery Time vs Review Score", fontsize=12, fontweight='bold', pad=10)
+ax5.set_xlabel("Delivery Days")
+ax5.set_ylabel("Review Score")
+ax5.spines[['top', 'right']].set_visible(False)
+plt.tight_layout()
+st.pyplot(fig5)
 
-# ── DISTRIBUTION REVIEW SCORE ─────────────────────────────────────────────────
-st.markdown("**Distribusi Review Score**")
-fig6, ax6 = plt.subplots(figsize=(10, 3))
-score_dist = filtered['review_score'].value_counts().sort_index()
-bar_colors = ['#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#27ae60']
-ax6.bar(score_dist.index, score_dist.values, color=bar_colors, edgecolor='white', width=0.6)
-for i, (idx, val) in enumerate(zip(score_dist.index, score_dist.values)):
-    ax6.text(idx, val + 10, f'{val:,}\n({val/len(filtered)*100:.1f}%)',
-             ha='center', fontsize=9, fontweight='bold')
-ax6.set_xticks([1, 2, 3, 4, 5])
-ax6.set_xticklabels(['⭐ 1', '⭐⭐ 2', '⭐⭐⭐ 3', '⭐⭐⭐⭐ 4', '⭐⭐⭐⭐⭐ 5'])
-ax6.set_ylabel('Jumlah Order')
-ax6.set_title('Distribusi Review Score', fontsize=12, fontweight='bold')
-ax6.grid(axis='y', alpha=0.3)
-fig6.tight_layout()
-st.pyplot(fig6)
+# Insight & Rekomendasi Q2
+col_ins2, col_rec2 = st.columns(2)
+with col_ins2:
+    st.markdown('<div class="insight-box">💡 <b>Insight:</b><br>'
+                '• Terdapat <b>hubungan negatif kuat</b> antara waktu pengiriman dan review score.<br>'
+                '• Selisih rata-rata delivery time antara ⭐1 vs ⭐5 mencapai <b>±9 hari</b>.<br>'
+                '• Review ⭐5 memiliki median delivery time <b>paling rendah</b>.<br>'
+                '• Keterlambatan pengiriman berkontribusi langsung terhadap penurunan kepuasan pelanggan.</div>',
+                unsafe_allow_html=True)
+with col_rec2:
+    st.markdown('<div class="rec-box">✅ <b>Rekomendasi:</b><br>'
+                '• 🚀 <b>Optimasi logistik:</b> Target delivery < 10–12 hari.<br>'
+                '• 📍 <b>Prioritas area demand tinggi:</b> Percepat pengiriman ke kota utama.<br>'
+                '• 📊 <b>Monitoring SLA:</b> Identifikasi order berpotensi terlambat lebih awal.<br>'
+                '• 🤝 <b>Seleksi ekspedisi:</b> Pilih partner dengan performa pengiriman terbaik.</div>',
+                unsafe_allow_html=True)
 
-st.divider()
-
-# ── CONCLUSION ────────────────────────────────────────────────────────────────
-st.markdown('<div class="section-header">✅ Conclusion & Recommendation</div>', unsafe_allow_html=True)
-
-col_e, col_f = st.columns(2)
-with col_e:
-    st.markdown("""
-    **📌 Conclusion Pertanyaan 1:**
-    - Pendapatan terkonsentrasi di kategori **Health & Beauty**, **Watches & Gifts**, dan **Bed, Bath & Table**
-    - Pola long-tail jelas: top 3 kategori mendominasi >35% total revenue
-    - Diversifikasi tetap penting untuk resiliensi bisnis
-    """)
-
-with col_f:
-    st.markdown("""
-    **📌 Conclusion Pertanyaan 2:**
-    - Korelasi negatif kuat antara waktu pengiriman dan kepuasan pelanggan
-    - Pengiriman ≤7 hari → review score tinggi (4–5 bintang)
-    - Pengiriman >20 hari → risiko tinggi mendapat review rendah (1–2 bintang)
-    """)
-
-st.info("""
-**💼 Rekomendasi Action Item:**
-1. **Prioritaskan stok & promosi** kategori Health & Beauty dan Watches & Gifts sebagai revenue driver utama
-2. **Optimasi logistik** dengan target delivery ≤7 hari untuk meningkatkan rata-rata review score
-3. **Monitor SLA pengiriman** secara real-time untuk mengurangi ketidakkonsistenan yang menyebabkan review rendah
-4. **Kembangkan kategori Electronics & Furniture** yang memiliki potensi revenue tinggi namun belum maksimal
-""")
-
-st.divider()
-st.caption("Dashboard dibuat untuk Proyek Analisis Data — Nadya Dinda Aisha Putri | Dicoding ID: CDCC006D6X0409")
+# ─────────────────────────────────────────────
+# FOOTER
+# ─────────────────────────────────────────────
+st.markdown("---")
+st.markdown(
+    "<div style='text-align:center; color:#888; font-size:0.85rem;'>"
+    "📌 Dashboard oleh <b>Nadya Dinda Aisha Putri</b> · E-Commerce Public Dataset Analysis 2017–2018"
+    "</div>",
+    unsafe_allow_html=True
+)
