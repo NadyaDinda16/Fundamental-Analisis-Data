@@ -179,31 +179,6 @@ data_path = find_data_path()
 
 if data_path is None:
     st.error("Folder dataset `E-commerce-public-dataset` tidak ditemukan!")
-    st.markdown("""
-**Penyebab & solusi:**
-
-1. **Folder belum di-push ke GitHub** — Pastikan folder `E-commerce-public-dataset` beserta semua file CSV-nya sudah di-commit & push ke repository.
-
-2. **Nama folder salah** — Periksa ejaan persis: `E-commerce-public-dataset` (huruf besar `E`, pakai tanda hubung `-`).
-
-3. **Struktur repo yang benar:**
-```
-nama-repo/
-├── dashboard.py
-└── E-commerce-public-dataset/
-    ├── customers_dataset.csv
-    ├── orders_dataset.csv
-    ├── order_items_dataset.csv
-    ├── products_dataset.csv
-    ├── order_reviews_dataset.csv
-    └── order_payments_dataset.csv
-```
-
-4. **File terlalu besar untuk GitHub?** Gunakan [Git LFS](https://git-lfs.github.com/) atau upload manual lewat Streamlit Cloud.
-""")
-    st.info(f"Script berjalan dari direktori: `{os.getcwd()}`")
-    st.stop()
-
 try:
     with st.spinner("Memuat data..."):
         main_df = load_data(data_path)
@@ -364,7 +339,13 @@ df_q2 = df_filtered[df_filtered['review_score'].isin(score_filter)].dropna(
 ).copy()
 df_q2['review_score'] = df_q2['review_score'].astype(int)
 
-palette_score = {1: '#ef4444', 2: '#f97316', 3: '#eab308', 4: '#84cc16', 5: '#22c55e'}
+palette_box = {
+    '1': '#ef4444',
+    '2': '#f97316',
+    '3': '#eab308',
+    '4': '#84cc16',
+    '5': '#22c55e'
+}
 
 col_box, col_bar = st.columns(2)
 
