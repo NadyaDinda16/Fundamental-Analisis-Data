@@ -372,7 +372,7 @@ with col_bar:
     )
     avg_del_score.columns = ['Review Score', 'Avg Delivery Days']
     fig4, ax4 = plt.subplots(figsize=(7, 4.5))
-    bar_colors = [palette_score.get(int(s), '#888') for s in avg_del_score['Review Score']]
+    bar_colors = [palette_box.get(int(s), '#888') for s in avg_del_score['Review Score']]
     bars4 = ax4.bar(
         avg_del_score['Review Score'].astype(str),
         avg_del_score['Avg Delivery Days'],
