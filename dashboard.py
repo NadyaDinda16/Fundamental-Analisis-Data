@@ -353,7 +353,7 @@ with col_box:
     fig3, ax3 = plt.subplots(figsize=(7, 4.5))
     sns.boxplot(
         data=df_q2, x='review_score', y='delivery_days',
-        palette=palette_score, width=0.55,
+        palette=palette_box, width=0.55,
         flierprops={'marker': 'o', 'markersize': 3, 'alpha': 0.3},
         ax=ax3
     )
