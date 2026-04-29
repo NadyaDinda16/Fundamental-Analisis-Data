@@ -25,7 +25,7 @@ st.markdown("""
     .section-header {
         font-size: 1.3rem;
         font-weight: 600;
-        color: #1a1a2e;
+        color: #eef2ff;
         border-bottom: 2px solid #4361ee;
         padding-bottom: 0.4rem;
         margin-bottom: 1rem;
